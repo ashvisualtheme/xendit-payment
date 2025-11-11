@@ -1,0 +1,11 @@
+{
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/xendit/xendit-php.git"
+    }
+  ],
+  "require": {
+    "xendit/xendit-php": "7.0.0"
+  }
+}
