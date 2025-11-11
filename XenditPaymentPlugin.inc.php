@@ -52,7 +52,7 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 	}
 
 	/**
-	 * Definisikan pengaturan plugin di form Admin OJS
+	 * Define plugin settings in the OJS admin form.
 	 */
 	public function addSettings($hookName, $form) {
 		import('lib.pkp.classes.components.forms.context.PKPPaymentSettingsForm');
@@ -78,22 +78,20 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 				'value' => (bool) $this->getSetting($context->getId(), 'testMode'),
 				'groupId' => 'xenditpayment',
 			]))
-			// --- PERUBAHAN DI SINI ---
-			// Ganti clientId/secret dengan apiKey
+			// Replace clientId/secret with apiKey
 			->addField(new \PKP\components\forms\FieldText('apiKey', [
-				'label' => __('plugins.paymethod.xendit.settings.apiKey'), // Tambahkan string ini ke file locale
-				'description' => __('plugins.paymethod.xendit.settings.apiKey.description'), // Tambahkan string ini ke file locale
+				'label' => __('plugins.paymethod.xendit.settings.apiKey'),
+				'description' => __('plugins.paymethod.xendit.settings.apiKey.description'),
 				'value' => $this->getSetting($context->getId(), 'apiKey'),
 				'groupId' => 'xenditpayment',
 			]))
-			// Tambahkan Webhook Secret untuk keamanan
+			// Add Webhook Secret for security
 			->addField(new \PKP\components\forms\FieldText('webhookSecret', [
-				'label' => __('plugins.paymethod.xendit.settings.webhookSecret'), // Tambahkan string ini ke file locale
-				'description' => __('plugins.paymethod.xendit.settings.webhookSecret.description'), // Tambahkan string ini ke file locale
+				'label' => __('plugins.paymethod.xendit.settings.webhookSecret'),
+				'description' => __('plugins.paymethod.xendit.settings.webhookSecret.description'),
 				'value' => $this->getSetting($context->getId(), 'webhookSecret'),
 				'groupId' => 'xenditpayment',
 			]));
-			// --- AKHIR PERUBAHAN ---
 	}
 
 	/**
@@ -104,12 +102,10 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 		$saveParams = [];
 		foreach ($allParams as $param => $val) {
 			switch ($param) {
-				// --- PERUBAHAN DI SINI ---
 				case 'apiKey':
 				case 'webhookSecret':
 					$saveParams[$param] = (string) $val;
 					break;
-				// --- AKHIR PERUBAHAN ---
 				case 'testMode':
 					$saveParams[$param] = $val === 'true';
 					break;
@@ -135,47 +131,39 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 	 */
 	function isConfigured($context) {
 		if (!$context) return false;
-		// --- PERUBAHAN DI SINI ---
 		if ($this->getSetting($context->getId(), 'apiKey') == '') return false;
-		// --- AKHIR PERUBAHAN ---
 		return true;
 	}
 
 	/**
-	 * Fungsi ini tidak lagi menangani 'return' dari Omnipay.
-	 * Sekarang ia menangani WEBHOOK dari Xendit.
+	 * It now handles WEBHOOKS from Xendit.
 	 */
 	function handle($args, $request) {
 		$journal = $request->getJournal();
 		if (!$journal) throw new \Exception('No journal context!');
 
-		// 1. Dapatkan 'x-callback-token' dari header
+		// 1. Get 'x-callback-token' from the header
 		$headers = getallheaders();
 		$callbackToken = null;
 		if (isset($headers['x-callback-token'])) {
 			$callbackToken = $headers['x-callback-token'];
 		} else if (isset($headers['X-Callback-Token'])) {
-			// Beberapa server mengubah kapitalisasinya
+			// Some servers change the capitalization
 			$callbackToken = $headers['X-Callback-Token'];
 		}
 		
-		// 2. Dapatkan token rahasia dari pengaturan
+		// 2. Get the secret token from settings
 		$webhookSecret = $this->getSetting($journal->getId(), 'webhookSecret');
 
-		// --- TAMBAHKAN 2 BARIS INI UNTUK DEBUG ---
-		error_log('Xendit DEBUG: Token diterima dari Xendit: [' . $callbackToken . ']');
-		error_log('Xendit DEBUG: Token disimpan di OJS: [' . $webhookSecret . ']');
-		// --- AKHIR TAMBAHAN DEBUG ---
-
-		// 3. Validasi token
+		// 3. Validate the token
 		if (!$webhookSecret || $callbackToken !== $webhookSecret) {
 			error_log('Xendit webhook validation failed: Invalid token');
 			header('HTTP/1.1 401 Unauthorized');
 			return;
 		}
 
-		// 4. Dapatkan data JSON dari body
-		$jsonPayload = file_get_contents('php://input'); // PERBAIKAN 2
+		// 4. Get JSON data from the body
+		$jsonPayload = file_get_contents('php://input');
 		$data = json_decode($jsonPayload);
 
 		if (!$data) { 
@@ -184,26 +172,26 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			return;
 		}
 
-		// 5. Periksa event
-		// (Saya tambahkan fallback untuk invoice 'PAID' juga)
+		// 5. Check the event
+		// (Fallback for the 'PAID' invoice event is included)
 		$paymentSuccess = false;
 		$paymentId = null;
 
 		if (isset($data->event) && $data->event == 'payment.capture' && isset($data->data->status) && $data->data->status == 'SUCCEEDED') {
-			// Ini adalah payload PaymentRequest (SDK v7)
+			// This is a PaymentRequest payload (SDK v7)
 			if (isset($data->data->reference_id)) {
 				$paymentSuccess = true;
 				$paymentId = $data->data->reference_id;
 			}
 		} else if (isset($data->status) && $data->status == 'PAID') {
-			// Ini adalah payload Invoice lama
+			// This is a legacy Invoice payload
 			if (isset($data->external_id)) {
 				$paymentSuccess = true;
 				$paymentId = $data->external_id;
 			}
 		}
 
-		// 6. Proses pembayaran jika sukses
+		// 6. Process the payment if successful
 		if ($paymentSuccess && $paymentId) {
 			try {
 				$queuedPaymentDao = DAORegistry::getDAO('QueuedPaymentDAO');
@@ -214,11 +202,11 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 					throw new \Exception("Invalid queued payment ID $paymentId!");
 				}
 
-				// Tandai pembayaran sebagai selesai
+				// Mark the payment as completed
 				$paymentManager = Application::getPaymentManager($journal);
 				$paymentManager->fulfillQueuedPayment($request, $queuedPayment, $this->getName());
 
-				// Balas Xendit dengan status 200 OK
+				// Respond to Xendit with a 200 OK status
 				echo 'Webhook received';
 				header('HTTP/1.1 200 OK');
 				return;
@@ -230,7 +218,7 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			}
 		}
 		
-		// Jika event bukan yang kita cari, tetap balas 200 OK
+		// If it's not an event we're looking for, still respond with 200 OK
 		echo 'Webhook acknowledged (Event not processed)';
 		header('HTTP/1.1 200 OK');
 		return;

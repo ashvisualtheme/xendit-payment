@@ -15,7 +15,7 @@
 
 import('lib.pkp.classes.form.Form');
 import('classes.i18n.AppLocale');
-import('lib.pkp.classes.core.PKPString'); // Memuat Guzzle
+
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
@@ -37,18 +37,16 @@ class XenditPaymentForm extends Form {
 		$paymentManager = Application::getPaymentManager($journal);
 		
 		try {
-			// --- API XENDIT v3: Tambahkan Data Customer ---
-
-			// 1. Dapatkan Kredensial
+			// 1. Get Credentials
 			$apiKey = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'apiKey');
 			$host = 'https://api.xendit.co';
 
-			// 2. Siapkan URL Redirect
+			// 2. Prepare Redirect URLs
 			$webhookUrl = $request->url(null, 'payment', 'plugin', array($this->_xenditPaymentPlugin->getName(), 'return'));
 			$successUrl = $this->_queuedPayment->getRequestUrl();
 			$failureUrl = $request->url(null, 'index');
 
-			// --- PERUBAHAN DI SINI: Dapatkan Data User OJS ---
+			// Get OJS User Data
 			$userDao = DAORegistry::getDAO('UserDAO');
 			$user = $userDao->getById($this->_queuedPayment->getUserId());
 			if (!$user) {
@@ -58,34 +56,31 @@ class XenditPaymentForm extends Form {
 			$locale = AppLocale::getLocale();
 			$givenName = $user->getGivenName($locale);
 			$familyName = $user->getFamilyName($locale);
-			// Buat objek customer
+			// Create customer object
 			$customerData = [
 				'reference_id' => 'OJS_USER_' . $user->getId(),
 				'type' => 'INDIVIDUAL',
 				'individual_detail' => [
 					'given_names' => $givenName,
-					'surname' => $familyName ? $familyName : $givenName // Fallback ke givenName jika familyName kosong
+					'surname' => $familyName ? $familyName : $givenName // Fallback to givenName if familyName is empty
 				],
 				'email' => $user->getEmail(),
-				// 'mobile_number' => $user->getPhone() // Tambahkan ini jika Anda mewajibkan telepon di OJS
 			];
-			// --- AKHIR PERUBAHAN ---
 
-
-			// 3. Siapkan Data Invoice (Payment Link) untuk API v2
+			// 3. Prepare Invoice Data for v2 API
 			$paymentDescription = $paymentManager->getPaymentName($this->_queuedPayment);
 			$paymentAmount = (float) number_format($this->_queuedPayment->getAmount(), 0, '.', '');
 
 			$invoiceData = [
 				'external_id' => (string) $this->_queuedPayment->getId(),
-				'amount' => $paymentAmount, // Total amount dihitung dari item di bawah
+				'amount' => $paymentAmount,
 				'payer_email' => $user->getEmail(),
 				'description' => $paymentDescription,
 				'customer' => $customerData,
 				'success_redirect_url' => $successUrl,
 				'failure_redirect_url' => $failureUrl,
-				'invoice_duration' => 31536000, // 1 tahun dalam detik
-				// Menambahkan rincian item untuk tampilan yang lebih baik di invoice Xendit
+				'invoice_duration' => 31536000, // 1 year in seconds
+				// Add item details for a better display on the Xendit invoice
 				'items' => [[
 					'name' => $paymentDescription,
 					'quantity' => 1,
@@ -93,23 +88,21 @@ class XenditPaymentForm extends Form {
 				]]
 			];
 
-			// 4. Buat header Guzzle Client untuk API v2
+			// 4. Create Guzzle Client headers for v2 API
 			$headers = [
 				'Content-Type'  => 'application/json',
 				'User-Agent'    => 'OJS-Xendit-Plugin/1.2',
 				'Authorization' => 'Basic ' . base64_encode($apiKey . ':') 
 			];
 
-			error_log('Xendit DEBUG (Form): Mengirim request Invoice v2 ke ' . $host . '/v2/invoices');
-
-			// 5. Buat Guzzle Client dan kirim request
+			// 5. Create Guzzle Client and send the request
 			$client = new Client();
 			$response = $client->request('POST', $host . '/v2/invoices', [
 				'headers' => $headers,
 				'body' => json_encode($invoiceData)
 			]);
 
-			// 6. Proses respon
+			// 6. Process the response
 			if ($response->getStatusCode() == 200 || $response->getStatusCode() == 201) {
 				$resultBody = $response->getBody()->getContents();
 				$resultData = json_decode($resultBody);
@@ -117,10 +110,10 @@ class XenditPaymentForm extends Form {
 				if ($resultData && isset($resultData->invoice_url)) {
 					$request->redirectUrl($resultData->invoice_url);
 				} else {
-					throw new \Exception('Gagal mendapatkan invoice_url dari Xendit.');
+					throw new \Exception('Failed to get invoice_url from Xendit.');
 				}
 			} else {
-				throw new \Exception('Request ke Xendit Invoice v2 gagal dengan status: ' . $response->getStatusCode());
+				throw new \Exception('Request to Xendit Invoice v2 failed with status: ' . $response->getStatusCode());
 			}
 			
 		} catch (RequestException $e) {

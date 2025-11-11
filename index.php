@@ -1,7 +1,7 @@
 <?php
 
 /**
- * @defgroup plugins_paymethod_xendit Xendit Payment Processing Plugin
+ * @defgroup plugins_paymethod_xendit Xendit Payment Plugin
  */
  
 /**
@@ -12,7 +12,7 @@
  * Distributed under the GNU GPL v3. For full terms see the file docs/COPYING.
  *
  * @ingroup plugins_paymethod_xendit
- * @brief Wrapper for Xendit payment plugin.
+ * @brief Wrapper for the Xendit payment plugin.
  */
 
 require_once('XenditPaymentPlugin.inc.php');
