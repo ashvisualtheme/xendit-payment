@@ -91,6 +91,25 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 				'description' => __('plugins.paymethod.xendit.settings.webhookSecret.description'),
 				'value' => $this->getSetting($context->getId(), 'webhookSecret'),
 				'groupId' => 'xenditpayment',
+			]))
+			->addField(new \PKP\components\forms\FieldText('invoiceDuration', [
+				'label' => __('plugins.paymethod.xendit.settings.invoiceDuration'),
+				'description' => __('plugins.paymethod.xendit.settings.invoiceDuration.description'),
+				'value' => $this->getSetting($context->getId(), 'invoiceDuration') ?? 30, // Default 30 hari
+				'size' => 'small',
+				'validation' => ['integer', 'min:1'],
+				'groupId' => 'xenditpayment',
+			]))
+			->addField(new \PKP\components\forms\FieldOptions('notificationChannels', [
+				'label' => __('plugins.paymethod.xendit.settings.notificationChannels'),
+				'description' => __('plugins.paymethod.xendit.settings.notificationChannels.description'),
+				'type' => 'checkbox',
+				'options' => [
+					['value' => 'email', 'label' => 'Email'],
+					['value' => 'whatsapp', 'label' => 'WhatsApp'],
+				],
+				'value' => $this->getSetting($context->getId(), 'notificationChannels') ?? ['email'],
+				'groupId' => 'xenditpayment',
 			]));
 	}
 
@@ -106,8 +125,14 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 				case 'webhookSecret':
 					$saveParams[$param] = (string) $val;
 					break;
+				case 'invoiceDuration':
+					$saveParams[$param] = (int) $val;
+					break;
 				case 'testMode':
 					$saveParams[$param] = $val === 'true';
+					break;
+				case 'notificationChannels':
+					$saveParams[$param] = is_array($val) ? $val : [];
 					break;
 			}
 		}
@@ -156,7 +181,7 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 		$webhookSecret = $this->getSetting($journal->getId(), 'webhookSecret');
 
 		// 3. Validate the token
-		if (!$webhookSecret || $callbackToken !== $webhookSecret) {
+		if (!$webhookSecret || !hash_equals($webhookSecret, (string)$callbackToken)) {
 			error_log('Xendit webhook validation failed: Invalid token');
 			header('HTTP/1.1 401 Unauthorized');
 			return;
@@ -196,8 +221,18 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			try {
 				$queuedPaymentDao = DAORegistry::getDAO('QueuedPaymentDAO');
 				import('classes.payment.ojs.OJSPaymentManager');
-				$queuedPayment = $queuedPaymentDao->getById($paymentId);
-
+				
+				// Try to find the payment by assoc_id (submission_id) first, then by queued_payment_id
+				$queuedPayment = $queuedPaymentDao->getByAssoc(
+					ASSOC_TYPE_SUBMISSION,
+					$paymentId
+				);
+				
+				if (!$queuedPayment) {
+					// Fallback to searching by queued_payment_id
+					$queuedPayment = $queuedPaymentDao->getById($paymentId);
+				}
+				
 				if (!$queuedPayment) {
 					throw new \Exception("Invalid queued payment ID $paymentId!");
 				}
