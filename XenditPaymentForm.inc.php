@@ -41,80 +41,135 @@ class XenditPaymentForm extends Form {
 		$host = 'https://api.xendit.co';
 		$headers = [
 			'Content-Type'  => 'application/json',
-			'User-Agent'    => 'OJS-Xendit-Plugin/1.3.0', // Version bump for new logic
-			'Authorization' => 'Basic ' . base64_encode($apiKey . ':') 
+			'User-Agent'    => 'OJS-Xendit-Plugin/1.0',
+			'Authorization' => 'Basic ' . base64_encode($apiKey . ':')
 		];
 
 		try {
-			// 1. Prepare Redirect URLs
 			$successUrl = $this->_queuedPayment->getRequestUrl();
 			$failureUrl = $request->url(null, 'index');
 
-			// Get OJS User Data
+			// Get OJS User Data.
+			// For publication fees, the user should be the primary author of the submission,
+			// not necessarily the user who is currently logged in (e.g., an admin).
+			$paymentType = $this->_queuedPayment->getType();
 			$userDao = DAORegistry::getDAO('UserDAO');
-			$user = $userDao->getById($this->_queuedPayment->getUserId());
-			if (!$user) {
-				throw new \Exception('User not found for this payment (ID: ' . $this->_queuedPayment->getUserId() . ').');
+			$customerData = [];
+			$payerEmail = '';
+
+			if ($paymentType == PAYMENT_TYPE_PUBLICATION) {
+				$submissionId = $this->_queuedPayment->getAssocId();
+				$submissionDao = DAORegistry::getDAO('SubmissionDAO');
+				/** @var Submission */
+				$submission = $submissionDao->getById($submissionId); // $assocId is the submission ID
+				if (!$submission) throw new \Exception("Submission (ID: {$submissionId}) not found for publication payment.");
+
+				/** @var Author */
+				$primaryAuthor = $submission->getPrimaryAuthor();
+				if (!$primaryAuthor) {
+					$authors = $submission->getAuthors();
+					$primaryAuthor = $authors[0] ?? null;
+				}
+
+				if (!$primaryAuthor) throw new \Exception("Primary author not found for submission ID: {$submissionId}.");
+
+				$locale = AppLocale::getLocale();
+				$givenName = $primaryAuthor->getGivenName($locale);
+				$familyName = $primaryAuthor->getFamilyName($locale);
+				$payerEmail = $primaryAuthor->getEmail();
+
+				$customerData = [
+					'reference_id' => 'OJS_AUTHOR_' . $primaryAuthor->getId(),
+					'type' => 'INDIVIDUAL',
+					'individual_detail' => [
+						'given_names' => $givenName,
+						'surname' => $familyName ? $familyName : $givenName
+					],
+					'email' => $payerEmail,
+					'addresses' => [[
+						'country' => $primaryAuthor->getCountry(),
+					]]
+				];
+
 			}
 
-			$locale = AppLocale::getLocale(); // 2. Get User Data
-			$givenName = $user->getGivenName($locale);
-			$familyName = $user->getFamilyName($locale);
-			$phone = $user->getPhone();
-			$country = $user->getCountry();
-			// Create customer object
-			$customerData = [
-				'reference_id' => 'OJS_USER_' . $user->getId(),
-				'type' => 'INDIVIDUAL',
-				'individual_detail' => [
-					'given_names' => $givenName,
-					'surname' => $familyName ? $familyName : $givenName // Fallback to givenName if familyName is empty
-				],
-				'email' => $user->getEmail(),
-			];
+			// For other payment types, or if the above logic didn't set $user (which it should for publication payments),
+			// use the user who initiated the queued payment.
+			if (empty($user)) { // Use empty() to also catch null or 0
+				$user = $userDao->getById($this->_queuedPayment->getUserId());
+			}
+			
+			// If customer data was not populated from author details, populate it from the user who initiated the payment.
+			if (empty($customerData)) {
+				if (!$user) throw new \Exception('User not found for this payment (ID: ' . $this->_queuedPayment->getUserId() . ').');
+				
+				$locale = AppLocale::getLocale();
+				$givenName = $user->getGivenName($locale);
+				$familyName = $user->getFamilyName($locale);
+				$payerEmail = $user->getEmail();
 
-			// Add mobile number if available
-			if (!empty($phone)) {
-				// Clean the phone number to include only digits and the leading '+'
-				$cleanedPhone = preg_replace('/[^\d+]/', '', $phone);
-				$customerData['mobile_number'] = $cleanedPhone;
+				$customerData = [
+					'reference_id' => 'OJS_USER_' . $user->getId(),
+					'type' => 'INDIVIDUAL',
+					'individual_detail' => [
+						'given_names' => $givenName,
+						'surname' => $familyName ? $familyName : $givenName
+					],
+					'email' => $payerEmail,
+					'addresses' => [[
+						'country' => $user->getCountry(),
+					]]
+				];
+
 			}
 
-			// Add address if country is available
-			if (!empty($country)) {
-				$customerData['addresses'] = [[
-					'country' => $country,
-					'street_line1' => $user->getMailingAddress(),
-					// OJS doesn't have separate fields for city, state, postal_code by default in user profile.
-					// This can be extended if custom fields are used.
-				]];
-			}
+			$paymentDescription = strip_tags($paymentManager->getPaymentName($this->_queuedPayment));
+			// Set the item name from the base description, ensuring it's clean.
+			$itemName = rtrim($paymentDescription, ': ');
 
-			// 3. Generate a deterministic and unique external_id for the OJS payment
 			$queuedPaymentId = $this->_queuedPayment->getId();
-			$journalPath = $journal->getPath();
 			$assocId = $this->_queuedPayment->getAssocId();
 			$paymentType = $this->_queuedPayment->getType();
-			
-			// Create a prefix based on payment type for better identification in Xendit dashboard
-			$typePrefix = 'QP'; // Default QueuedPayment
+			$userId = $this->_queuedPayment->getUserId();
+			$externalId = (string) $queuedPaymentId;
+
 			switch ($paymentType) {
 				case PAYMENT_TYPE_PUBLICATION:
 				case PAYMENT_TYPE_PURCHASE_ARTICLE:
-					$typePrefix = 'ART'; break;
+					$externalId .= "-ART-{$assocId}";
+					$submissionDao = DAORegistry::getDAO('SubmissionDAO');
+					/** @var Submission */
+					$submission = $submissionDao->getById($assocId);
+					if ($submission) {
+						$paymentDescription .= ': ' . $submission->getLocalizedTitle();
+					}
+					break;
 				case PAYMENT_TYPE_PURCHASE_ISSUE:
-					$typePrefix = 'ISS'; break;
+					$externalId .= "-ISS-{$assocId}";
+					$issueDao = DAORegistry::getDAO('IssueDAO');
+					/** @var Issue */
+					$issue = $issueDao->getById($assocId);
+					if ($issue) {
+						$paymentDescription .= ': ' . $issue->getLocalizedTitle();
+					}
+					break;
 				case PAYMENT_TYPE_PURCHASE_SUBSCRIPTION:
 				case PAYMENT_TYPE_RENEW_SUBSCRIPTION:
-					$typePrefix = 'SUB'; break;
+					$externalId .= "-SUB-{$userId}";
+					break;
 				case PAYMENT_TYPE_MEMBERSHIP:
-					$typePrefix = 'MEM'; break;
+					$externalId .= "-MEM-{$userId}";
+					break;
 				case PAYMENT_TYPE_DONATION:
-					$typePrefix = 'DON'; break;
+					$externalId .= "-DON-{$userId}";
+					break;
+				default:
+					// Fallback for other or future payment types
+					$externalId .= "-GEN-{$assocId}";
+					break;
 			}
-			$externalId = "OJS-{$journalPath}-{$typePrefix}-{$queuedPaymentId}";
 
-			// 4. Check if an invoice already exists and is pending
+			// Check if an invoice already exists and is pending
 			try {
 				$response = $client->request('GET', $host . '/v2/invoices?external_id=' . urlencode($externalId), ['headers' => $headers]);
 				$existingInvoices = json_decode($response->getBody()->getContents());
@@ -137,10 +192,7 @@ class XenditPaymentForm extends Form {
 				}
 			}
 
-			// 5. Prepare data for new invoice creation
-			$paymentDescription = strip_tags($paymentManager->getPaymentName($this->_queuedPayment));
 			$paymentAmount = (float) number_format($this->_queuedPayment->getAmount(), 2, '.', '');
-			$itemName = $paymentDescription;
 
 			// Get invoice duration from plugin settings (in days), convert to seconds
 			$invoiceDurationDays = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'invoiceDuration') ?? 30;
@@ -150,7 +202,7 @@ class XenditPaymentForm extends Form {
 				'external_id' => $externalId, // Use the new deterministic ID
 				'amount' => $paymentAmount,
 				'currency' => $this->_queuedPayment->getCurrencyCode(),
-				'payer_email' => $user->getEmail(),
+				'payer_email' => $payerEmail,
 				'description' => $paymentDescription,
 				'customer' => $customerData,
 				'success_redirect_url' => $successUrl,
@@ -166,7 +218,6 @@ class XenditPaymentForm extends Form {
 				]]
 			];
 
-			// 6. Add Customer Notification Preferences from plugin settings
 			$notificationChannels = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'notificationChannels');
 			if (!empty($notificationChannels)) {
 				$invoiceData['customer_notification_preference'] = [
@@ -176,14 +227,21 @@ class XenditPaymentForm extends Form {
 					'invoice_paid' => $notificationChannels
 				];
 			}
+			
+			// Add OJS-specific context as metadata for easier debugging and reconciliation
+			$invoiceData['metadata'] = [
+				'ojs_version' => Application::get()->getCurrentVersion()->getVersionString(),
+				'plugin_version' => $this->_xenditPaymentPlugin->getCurrentVersion()->getVersionString(),
+				'ojs_queued_payment_id' => $queuedPaymentId,
+				'ojs_context_id' => $journal->getId(),
+				'ojs_payment_type' => $paymentType,
+			];
 
-			// 7. Send the request to create a new invoice
 			$response = $client->request('POST', $host . '/v2/invoices', [
 				'headers' => $headers,
 				'body' => json_encode($invoiceData)
 			]);
 
-			// 7. Process the response
 			if ($response->getStatusCode() == 200 || $response->getStatusCode() == 201) {
 				$resultBody = $response->getBody()->getContents(); // This is a new invoice
 				$resultData = json_decode($resultBody);
