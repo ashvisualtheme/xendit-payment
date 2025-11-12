@@ -67,10 +67,11 @@ a. **API Key**:
 
 b. **Webhook Secret (Callback Verification Token)**:
    - Navigate to `Settings` > `Developers` > `Webhooks`.
-   - Set your Webhook URL to: `https://YOUR_JOURNAL_URL/index.php/context/payment/plugin/XenditPayment/webhook`
+   - Set your Webhook URL to: `https://[YOUR_JOURNAL_URL]/index.php/[context]/payment/plugin/XenditPayment/webhook`
      - Replace `https://YOUR_JOURNAL_URL` with your OJS site's URL.
      - Replace `context` with your journal's path (e.g., `biologyjournal`).
    - **Important Note**: If the `disable_path_info` setting in your OJS `config.inc.php` file is set to `On`, you must use the following URL format instead:
+   
      `https://YOUR_JOURNAL_URL/index.php?journal=context&page=payment&op=plugin&plugin=XenditPayment&path=webhook`
    - Click "Verify Token" to view or set your verification token. Copy this token.
    - Ensure you check the `Invoice paid` event in the webhook settings.
