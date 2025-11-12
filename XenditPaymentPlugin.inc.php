@@ -161,20 +161,47 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 	}
 
 	/**
-	 * It now handles WEBHOOKS from Xendit.
+	 * Handle incoming requests from OJS.
+	 *
+	 * @param $args array
+	 * @param $request PKPRequest
 	 */
 	function handle($args, $request) {
+		$op = isset($args[0]) ? $args[0] : null;
+		switch ($op) {
+			case 'webhook':
+				return $this->webhook($args, $request);
+			default:
+				$request->getDispatcher()->handle404();
+				return false;
+		}
+	}
+
+
+	/**
+	 * Handles incoming webhooks from Xendit.
+	 */
+	function webhook($args, $request) {
 		$journal = $request->getJournal();
 		if (!$journal) throw new \Exception('No journal context!');
 
-		// 1. Get 'x-callback-token' from the header
-		$headers = getallheaders();
+		// 1. Get 'x-callback-token' from the header in a cross-server compatible way
 		$callbackToken = null;
-		if (isset($headers['x-callback-token'])) {
-			$callbackToken = $headers['x-callback-token'];
-		} else if (isset($headers['X-Callback-Token'])) {
-			// Some servers change the capitalization
-			$callbackToken = $headers['X-Callback-Token'];
+		if (isset($_SERVER['HTTP_X_CALLBACK_TOKEN'])) { // Standard for FastCGI/Nginx
+			$callbackToken = $_SERVER['HTTP_X_CALLBACK_TOKEN'];
+		} elseif (function_exists('getallheaders')) { // Standard for Apache
+			$headers = getallheaders();
+			$headers = array_change_key_case($headers, CASE_LOWER);
+			if (isset($headers['x-callback-token'])) {
+				$callbackToken = $headers['x-callback-token'];
+			}
+		} else { // Fallback for other server configurations
+			foreach ($_SERVER as $key => $value) {
+				if (strtolower($key) === 'http_x_callback_token') {
+					$callbackToken = $value;
+					break;
+				}
+			}
 		}
 		
 		// 2. Get the secret token from settings
@@ -182,7 +209,23 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 
 		// 3. Validate the token
 		if (!$webhookSecret || !hash_equals($webhookSecret, (string)$callbackToken)) {
-			error_log('Xendit webhook validation failed: Invalid token');
+			$logMessage = $callbackToken ? 'Token mismatch' : 'Token not received';
+			// Add extensive debugging for 'Token not received' to diagnose server configuration issues.
+			if (!$callbackToken) {
+				$availableHeaders = 'getallheaders() not available.';
+				if (function_exists('getallheaders')) {
+					$availableHeaders = json_encode(getallheaders());
+				} else {
+					$serverHeaders = [];
+					foreach ($_SERVER as $key => $value) {
+						if (strpos($key, 'HTTP_') === 0) $serverHeaders[$key] = $value;
+					}
+					$availableHeaders = json_encode($serverHeaders);
+				}
+				error_log('Xendit webhook validation failed: ' . $logMessage . '. Available headers: ' . $availableHeaders);
+			} else {
+				error_log('Xendit webhook validation failed: ' . $logMessage);
+			}
 			header('HTTP/1.1 401 Unauthorized');
 			return;
 		}
@@ -197,19 +240,29 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			return;
 		}
 
-		// 5. Check the event
-		// (Fallback for the 'PAID' invoice event is included)
+		// 5. Check for a successful payment event
 		$paymentSuccess = false;
 		$paymentId = null;
 
-		if (isset($data->event) && $data->event == 'payment.capture' && isset($data->data->status) && $data->data->status == 'SUCCEEDED') {
-			// This is a PaymentRequest payload (SDK v7)
-			if (isset($data->data->reference_id)) {
+		// Handle the modern 'invoice.paid' event from the v2 Invoice API.
+		// The plugin uses the v2 Invoice API, so this is the primary event to check.
+		if (isset($data->event) && $data->event === 'invoice.paid') {
+			// The actual invoice data is nested inside the 'data' property
+			$invoiceData = $data->data;
+			if (isset($invoiceData->status) && $invoiceData->status === 'PAID' && isset($invoiceData->external_id)) {
 				$paymentSuccess = true;
-				$paymentId = $data->data->reference_id;
+				$paymentId = $invoiceData->external_id;
 			}
-		} else if (isset($data->status) && $data->status == 'PAID') {
-			// This is a legacy Invoice payload
+		// Handle the 'payment.succeeded' event from other Xendit products (e.g., Payment Request).
+		} else if (isset($data->event) && $data->event === 'payment.succeeded') {
+			$paymentData = $data->data;
+			// For 'payment.succeeded', the OJS payment ID is stored in the 'external_id' of the invoice,
+			// which is available in the payment method's metadata or channel properties.
+			if (isset($paymentData->status) && $paymentData->status === 'SUCCEEDED' && isset($paymentData->payment_method->channel_properties->external_id)) {
+				$paymentSuccess = true;
+				$paymentId = $paymentData->payment_method->channel_properties->external_id;
+			}
+		} else if (isset($data->status) && $data->status === 'PAID') { // Fallback for older webhook formats
 			if (isset($data->external_id)) {
 				$paymentSuccess = true;
 				$paymentId = $data->external_id;
@@ -221,25 +274,48 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			try {
 				$queuedPaymentDao = DAORegistry::getDAO('QueuedPaymentDAO');
 				import('classes.payment.ojs.OJSPaymentManager');
-				
-				// Try to find the payment by assoc_id (submission_id) first, then by queued_payment_id
-				$queuedPayment = $queuedPaymentDao->getByAssoc(
-					ASSOC_TYPE_SUBMISSION,
-					$paymentId
-				);
-				
-				if (!$queuedPayment) {
-					// Fallback to searching by queued_payment_id
-					$queuedPayment = $queuedPaymentDao->getById($paymentId);
-				}
-				
-				if (!$queuedPayment) {
-					throw new \Exception("Invalid queued payment ID $paymentId!");
+
+				// Add a check to ensure the external_id format is what we expect from this plugin.
+				// This prevents errors from test webhooks sent from the Xendit dashboard.
+				if (strpos($paymentId, 'OJS-') !== 0) {
+					// Not a payment initiated by this plugin, ignore it.
+					throw new \Exception("Ignoring webhook with non-OJS external_id: $paymentId");
 				}
 
+				// The $paymentId from the webhook is the external_id we sent.
+				// The format is "OJS-{journalPath}-{typePrefix}-{queuedPaymentId}".
+				// We need to reliably extract the last part, which is the queuedPaymentId.
+				$idParts = explode('-', $paymentId);
+				$queuedPaymentId = end($idParts);
+
+				// Validate that the extracted part is a numeric ID.
+				if (!ctype_digit((string)$queuedPaymentId)) {
+					throw new \Exception("Could not parse a valid numeric queued_payment_id from external_id: $paymentId");
+				}
+
+				/** @var QueuedPayment */
+				$queuedPayment = $queuedPaymentDao->getById((int)$queuedPaymentId);
+
+				if (!$queuedPayment) {
+					throw new \Exception("No queued payment found for ID derived from external_id: $paymentId");
+				}
+
+				// Get the journal context from the queued payment to ensure it's correctly loaded,
+				// as webhook requests might not have a journal in the request context.
+				$contextId = $queuedPayment->getContextId();
+				$journalDao = DAORegistry::getDAO('JournalDAO');
+				$journal = $journalDao->getById($contextId);
+				if (!$journal) {
+					throw new \Exception("Could not load journal context for QueuedPayment ID: $queuedPaymentId");
+				}
+
+				// Initialize the payment manager within this scope with the correct journal context.
+				$paymentManager = new OJSPaymentManager($journal);
+
 				// Mark the payment as completed
-				$paymentManager = Application::getPaymentManager($journal);
-				$paymentManager->fulfillQueuedPayment($request, $queuedPayment, $this->getName());
+				// Pass null for the request object, as we are in a stateless webhook context.
+				// The payment manager will use the context from the QueuedPayment object.
+				$paymentManager->fulfillQueuedPayment(null, $queuedPayment, $this->getName());
 
 				// Respond to Xendit with a 200 OK status
 				echo 'Webhook received';
@@ -247,8 +323,17 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 				return;
 
 			} catch (\Exception $e) {
-				error_log('Xendit webhook exception: ' . $e->getMessage());
-				header('HTTP/1.1 500 Internal Server Error');
+				// Log the exception message.
+				error_log('Xendit webhook processing error: ' . $e->getMessage());
+
+				// If the exception is for ignoring a webhook, we should return a 200 OK
+				// to prevent Xendit from retrying. For all other errors, return 500.
+				if (strpos($e->getMessage(), 'Ignoring webhook') === 0) {
+					echo 'Webhook acknowledged but ignored as irrelevant.';
+					header('HTTP/1.1 200 OK');
+				} else {
+					header('HTTP/1.1 500 Internal Server Error');
+				}
 				return;
 			}
 		}

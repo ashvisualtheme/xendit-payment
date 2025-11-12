@@ -36,13 +36,17 @@ class XenditPaymentForm extends Form {
 		$journal = $request->getJournal();
 		$paymentManager = Application::getPaymentManager($journal);
 		
-		try {
-			// 1. Get Credentials
-			$apiKey = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'apiKey');
-			$host = 'https://api.xendit.co';
+		$client = new Client();
+		$apiKey = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'apiKey');
+		$host = 'https://api.xendit.co';
+		$headers = [
+			'Content-Type'  => 'application/json',
+			'User-Agent'    => 'OJS-Xendit-Plugin/1.3.0', // Version bump for new logic
+			'Authorization' => 'Basic ' . base64_encode($apiKey . ':') 
+		];
 
-			// 2. Prepare Redirect URLs
-			$webhookUrl = $request->url(null, 'payment', 'plugin', array($this->_xenditPaymentPlugin->getName(), 'return'));
+		try {
+			// 1. Prepare Redirect URLs
 			$successUrl = $this->_queuedPayment->getRequestUrl();
 			$failureUrl = $request->url(null, 'index');
 
@@ -53,10 +57,11 @@ class XenditPaymentForm extends Form {
 				throw new \Exception('User not found for this payment (ID: ' . $this->_queuedPayment->getUserId() . ').');
 			}
 
-			$locale = AppLocale::getLocale();
+			$locale = AppLocale::getLocale(); // 2. Get User Data
 			$givenName = $user->getGivenName($locale);
 			$familyName = $user->getFamilyName($locale);
 			$phone = $user->getPhone();
+			$country = $user->getCountry();
 			// Create customer object
 			$customerData = [
 				'reference_id' => 'OJS_USER_' . $user->getId(),
@@ -75,69 +80,74 @@ class XenditPaymentForm extends Form {
 				$customerData['mobile_number'] = $cleanedPhone;
 			}
 
-			// 3. Prepare Invoice Data for v2 API
-			$paymentDescription = strip_tags($paymentManager->getPaymentName($this->_queuedPayment));
-			$paymentAmount = (float) number_format($this->_queuedPayment->getAmount(), 2, '.', '');
-			$itemName = $paymentDescription; // Short description for item name
+			// Add address if country is available
+			if (!empty($country)) {
+				$customerData['addresses'] = [[
+					'country' => $country,
+					'street_line1' => $user->getMailingAddress(),
+					// OJS doesn't have separate fields for city, state, postal_code by default in user profile.
+					// This can be extended if custom fields are used.
+				]];
+			}
 
-			// Use a switch statement for cleaner logic and extensibility
-			$externalId = (string) $this->_queuedPayment->getId(); // Default external_id
+			// 3. Generate a deterministic and unique external_id for the OJS payment
+			$queuedPaymentId = $this->_queuedPayment->getId();
+			$journalPath = $journal->getPath();
 			$assocId = $this->_queuedPayment->getAssocId();
+			$paymentType = $this->_queuedPayment->getType();
 			
-			switch ($this->_queuedPayment->getType()) {
+			// Create a prefix based on payment type for better identification in Xendit dashboard
+			$typePrefix = 'QP'; // Default QueuedPayment
+			switch ($paymentType) {
 				case PAYMENT_TYPE_PUBLICATION:
 				case PAYMENT_TYPE_PURCHASE_ARTICLE:
-					$externalId = 'Article-' . $assocId;
-					$submissionDao = DAORegistry::getDAO('SubmissionDAO');
-					/** @var Submission */
-					$submission = $submissionDao->getById($assocId);
-					if ($submission) {
-						$submissionTitle = $submission->getLocalizedTitle();
-						$paymentDescription .= ': ' . strip_tags($submissionTitle);
-					}
-					break;
-				
+					$typePrefix = 'ART'; break;
 				case PAYMENT_TYPE_PURCHASE_ISSUE:
-					$externalId = 'Issue-' . $assocId;
-					$issueDao = DAORegistry::getDAO('IssueDAO');
-					/** @var Issue */
-					$issue = $issueDao->getById($assocId);
-					if ($issue) {
-						$issueTitle = $issue->getLocalizedTitle();
-						if (empty($issueTitle)) {
-							$issueTitle = $issue->getIssueIdentification();
-						}
-						$paymentDescription .= ': ' . strip_tags($issueTitle);
-					}
-					break;
-				
+					$typePrefix = 'ISS'; break;
 				case PAYMENT_TYPE_PURCHASE_SUBSCRIPTION:
 				case PAYMENT_TYPE_RENEW_SUBSCRIPTION:
-					$externalId = 'Subscription-' . $assocId;
-					// The description from getPaymentName is already detailed enough
-					// (e.g., "Purchase Subscription (Subscription Type Name)")
-					break;
-
+					$typePrefix = 'SUB'; break;
 				case PAYMENT_TYPE_MEMBERSHIP:
-					// assocId is not consistently used for membership, so we use the user ID for a unique reference.
-					$externalId = 'Membership-' . $this->_queuedPayment->getUserId();
-					break;
-
+					$typePrefix = 'MEM'; break;
 				case PAYMENT_TYPE_DONATION:
-					$externalId = 'Donation-' . $this->_queuedPayment->getId();
-					break;
-				
-				default:
-					// Fallback for any other payment types. The default externalId (queued_payment_id) is used.
-					break;
+					$typePrefix = 'DON'; break;
 			}
+			$externalId = "OJS-{$journalPath}-{$typePrefix}-{$queuedPaymentId}";
+
+			// 4. Check if an invoice already exists and is pending
+			try {
+				$response = $client->request('GET', $host . '/v2/invoices?external_id=' . urlencode($externalId), ['headers' => $headers]);
+				$existingInvoices = json_decode($response->getBody()->getContents());
+
+				if (!empty($existingInvoices)) {
+					// Invoices are returned newest first. Check the first one.
+					$latestInvoice = $existingInvoices[0];
+					if ($latestInvoice->status === 'PENDING') {
+						// Found an active invoice, redirect user to it
+						$request->redirectUrl($latestInvoice->invoice_url);
+						return; // Stop further execution
+					}
+				}
+			} catch (RequestException $e) {
+				// A 404 Not Found error is expected if no invoice exists.
+				// We can ignore it and proceed to create a new one.
+				if (!$e->hasResponse() || $e->getResponse()->getStatusCode() !== 404) {
+					// For other errors (e.g., auth), re-throw the exception.
+					throw $e;
+				}
+			}
+
+			// 5. Prepare data for new invoice creation
+			$paymentDescription = strip_tags($paymentManager->getPaymentName($this->_queuedPayment));
+			$paymentAmount = (float) number_format($this->_queuedPayment->getAmount(), 2, '.', '');
+			$itemName = $paymentDescription;
 
 			// Get invoice duration from plugin settings (in days), convert to seconds
 			$invoiceDurationDays = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'invoiceDuration') ?? 30;
 			$invoiceDurationSeconds = (int) $invoiceDurationDays * 24 * 60 * 60;
 
 			$invoiceData = [
-				'external_id' => $externalId,
+				'external_id' => $externalId, // Use the new deterministic ID
 				'amount' => $paymentAmount,
 				'currency' => $this->_queuedPayment->getCurrencyCode(),
 				'payer_email' => $user->getEmail(),
@@ -150,11 +160,13 @@ class XenditPaymentForm extends Form {
 				'items' => [[
 					'name' => $itemName,
 					'quantity' => 1,
-					'price' => $paymentAmount
+					'price' => $paymentAmount,
+					'category' => 'Digital Product',
+					'url' => $request->getRequestUrl()
 				]]
 			];
 
-			// 4. Add Customer Notification Preferences from plugin settings
+			// 6. Add Customer Notification Preferences from plugin settings
 			$notificationChannels = $this->_xenditPaymentPlugin->getSetting($journal->getId(), 'notificationChannels');
 			if (!empty($notificationChannels)) {
 				$invoiceData['customer_notification_preference'] = [
@@ -165,15 +177,7 @@ class XenditPaymentForm extends Form {
 				];
 			}
 
-			// 5. Create Guzzle Client headers for v2 API
-			$headers = [
-				'Content-Type'  => 'application/json',
-				'User-Agent'    => 'OJS-Xendit-Plugin/1.2',
-				'Authorization' => 'Basic ' . base64_encode($apiKey . ':') 
-			];
-
-			// 6. Create Guzzle Client and send the request
-			$client = new Client();
+			// 7. Send the request to create a new invoice
 			$response = $client->request('POST', $host . '/v2/invoices', [
 				'headers' => $headers,
 				'body' => json_encode($invoiceData)
@@ -181,7 +185,7 @@ class XenditPaymentForm extends Form {
 
 			// 7. Process the response
 			if ($response->getStatusCode() == 200 || $response->getStatusCode() == 201) {
-				$resultBody = $response->getBody()->getContents();
+				$resultBody = $response->getBody()->getContents(); // This is a new invoice
 				$resultData = json_decode($resultBody);
 
 				if ($resultData && isset($resultData->invoice_url)) {
@@ -194,15 +198,15 @@ class XenditPaymentForm extends Form {
 			}
 			
 		} catch (RequestException $e) {
-			error_log('Xendit Guzzle Invoice v2 exception: ' . $e->getMessage());
+			error_log('Xendit Guzzle Invoice exception: ' . $e->getMessage());
 			if ($e->hasResponse()) {
-				error_log('Guzzle Response Body v2: ' . $e->getResponse()->getBody()->getContents());
+				error_log('Guzzle Response Body: ' . $e->getResponse()->getBody()->getContents());
 			}
 			$templateMgr = TemplateManager::getManager($request);
 			$templateMgr->assign('message', 'plugins.paymethod.xendit.error');
 			$templateMgr->display('frontend/pages/message.tpl');
 		} catch (\Exception $e) {
-			error_log('Xendit transaction Invoice v2 exception: ' . $e->getMessage());
+			error_log('Xendit transaction Invoice exception: ' . $e->getMessage());
 			$templateMgr = TemplateManager::getManager($request);
 			$templateMgr->assign('message', 'plugins.paymethod.xendit.error');
 			$templateMgr->display('frontend/pages/message.tpl');
