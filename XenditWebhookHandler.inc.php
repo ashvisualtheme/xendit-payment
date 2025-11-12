@@ -37,7 +37,6 @@ class XenditWebhookHandler {
      * @return bool
      */
     public function verify() {
-        error_log('Xendit DEBUG: Inside verify()...');
         $webhookSecret = $this->_plugin->getSetting($this->_journal->getId(), 'webhookSecret');
         $callbackToken = null;
 
@@ -50,22 +49,14 @@ class XenditWebhookHandler {
             }
         }
 
-        // TAMBAHAN LOG: Tampilkan token untuk perbandingan
-        error_log('Xendit DEBUG: Token from OJS Setting (webhookSecret): ' . $webhookSecret);
-        error_log('Xendit DEBUG: Token from Xendit Header (x-callback-token): ' . $callbackToken);
-
         if (!$webhookSecret || !$callbackToken) {
-            error_log('Xendit DEBUG: Webhook validation failed: Token not received (Secret: ' . ($webhookSecret ? 'SET' : 'NOT SET') . ', Received: ' . ($callbackToken ? 'RECEIVED' : 'NOT RECEIVED') . ')');
             return false;
         }
 
         $isValid = hash_equals($webhookSecret, $callbackToken);
         if (!$isValid) {
-            error_log('Xendit DEBUG: Webhook validation failed: Token mismatch');
             return false;
         }
-        
-        error_log('Xendit DEBUG: Token verification successful.');
         return true;
     }
 
@@ -75,20 +66,13 @@ class XenditWebhookHandler {
      * @return stdClass|null
      */
     public function parsePayload() {
-        error_log('Xendit DEBUG: Inside parsePayload()...');
         $jsonPayload = file_get_contents('php://input');
-        
-        // TAMBAHAN LOG: Tampilkan payload mentah dari Xendit
-        error_log('Xendit DEBUG: Raw payload from php://input: ' . $jsonPayload);
 
         $data = json_decode($jsonPayload);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-             error_log('Xendit DEBUG: Failed to decode JSON payload. Error: ' . json_last_error_msg());
              return null;
         }
-
-        error_log('Xendit DEBUG: Payload parsed successfully.');
         return $data;
     }
 
@@ -99,40 +83,21 @@ class XenditWebhookHandler {
      * @return string|null
      */
     public function getPaymentId($data) {
-        error_log('Xendit DEBUG: Inside getPaymentId()...');
-
-        // ===== PERBAIKAN DIMULAI DI SINI =====
-        
-        // 1. Cek format "Event" (yang diharapkan kode asli)
         if (isset($data->event) && $data->event === 'invoice.paid') {
-            error_log('Xendit DEBUG: Found "Event" wrapper. Checking data property.');
             if (isset($data->data) && isset($data->data->status) && $data->data->status === 'PAID') {
-                error_log('Xendit DEBUG: Event is "invoice.paid" and data.status is "PAID". External ID: ' . $data->data->external_id);
                 return $data->data->external_id;
             } else {
-                error_log('Xendit DEBUG: Event is "invoice.paid" but data.status is not PAID or data is missing.');
                 return null;
             }
         }
 
-        // 2. Cek format "Invoice" langsung (yang ada di log Anda)
         if (!isset($data->event) && isset($data->status) && $data->status === 'PAID') {
-            error_log('Xendit DEBUG: Found "Invoice" payload (no event wrapper). Status is "PAID".');
             if (isset($data->external_id)) {
-                error_log('Xendit DEBUG: Returning external_id: ' . $data->external_id);
                 return $data->external_id;
             } else {
-                error_log('Xendit DEBUG: Status is PAID but external_id is missing!');
                 return null;
             }
         }
-        
-        // ===== PERBAIKAN SELESAI =====
-
-        // Log jika gagal
-        error_log('Xendit DEBUG: No relevant PAID status found in either payload format. No payment ID returned.');
-        if (isset($data->event)) error_log('Xendit DEBUG: (Debug info) Event was: ' . $data->event);
-        if (isset($data->status)) error_log('Xendit DEBUG: (Debug info) Status was: ' . $data->status);
 
         return null;
     }

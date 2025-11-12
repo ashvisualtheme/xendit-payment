@@ -179,52 +179,38 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 	 * Handles incoming webhooks from Xendit.
 	 */
 	function webhook($args, $request) {
-		error_log('Xendit DEBUG: Webhook endpoint hit.'); // <- LOG ANDA SUDAH DI SINI
 		$this->import('XenditWebhookHandler');
 		$journal = $request->getJournal();
 		if (!$journal) {
-			error_log('Xendit DEBUG: Webhook error: No journal context!');
 			header('HTTP/1.1 400 Bad Request');
 			return;
 		}
-		error_log('Xendit DEBUG: Journal context loaded: ' . $journal->getPath());
 
 		$handler = new XenditWebhookHandler($this, $journal);
 
-		error_log('Xendit DEBUG: Calling handler->verify()...');
 		if (!$handler->verify()) {
-			error_log('Xendit DEBUG: handler->verify() returned false. Stopping.');
 			header('HTTP/1.1 401 Unauthorized');
 			return;
 		}
-		error_log('Xendit DEBUG: handler->verify() returned true.');
 
-		error_log('Xendit DEBUG: Calling handler->parsePayload()...');
 		$data = $handler->parsePayload();
 		if (!$data) { 
-			error_log('Xendit DEBUG: handler->parsePayload() returned null/false. Invalid payload.');
 			header('HTTP/1.1 400 Bad Request');
 			return;
 		}
-		error_log('Xendit DEBUG: handler->parsePayload() OK.');
 
-		error_log('Xendit DEBUG: Calling handler->getPaymentId()...');
 		$paymentId = $handler->getPaymentId($data);
 
 		if ($paymentId) {
-			error_log('Xendit DEBUG: Payment ID (external_id) found: ' . $paymentId);
 			try {
 				$this->import('XenditPaymentProcessor');
 				$processor = new XenditPaymentProcessor($this, $request);
-				
-				error_log('Xendit DEBUG: Calling processor->process() with paymentId: ' . $paymentId);
 				$processor->process($paymentId); // This method now handles idempotency internally
-				error_log('Xendit DEBUG: processor->process() finished.');
 
 				echo 'Webhook received and processed';
 				header('HTTP/1.1 200 OK');
 			} catch (\Exception $e) {
-				error_log('Xendit DEBUG: Webhook processing error: ' . $e->getMessage());
+				error_log('Xendit Webhook Error: ' . $e->getMessage());
 				header('HTTP/1.1 500 Internal Server Error');
 			}
 		} else {
