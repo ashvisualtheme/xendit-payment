@@ -76,6 +76,20 @@ class XenditPaymentProcessor {
             throw new \Exception("Could not load journal context for QueuedPayment ID: $queuedPaymentId");
         }
 
+        // Validate payment type before proceeding
+        $validPaymentTypes = [
+            PAYMENT_TYPE_PURCHASE_SUBSCRIPTION,
+            PAYMENT_TYPE_RENEW_SUBSCRIPTION,
+            PAYMENT_TYPE_PUBLICATION,
+            PAYMENT_TYPE_PURCHASE_ARTICLE,
+            PAYMENT_TYPE_PURCHASE_ISSUE,
+            PAYMENT_TYPE_MEMBERSHIP,
+            PAYMENT_TYPE_DONATION
+        ];
+        if (!in_array($queuedPayment->getType(), $validPaymentTypes)) {
+            throw new \Exception('Invalid or unsupported payment type "' . $queuedPayment->getType() . '"');
+        }
+
         // Initialize the payment manager with the correct journal context.
         $paymentManager = new OJSPaymentManager($journal);
 

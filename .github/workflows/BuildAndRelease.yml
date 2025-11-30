@@ -1,13 +1,43 @@
 # .github/workflows/main.yml
 
-name: Build and Upload Release Package
+name: Test, Build and Upload Release Package
 
 on:
   release:
     types: [created]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version: ['7.4', '8.0', '8.1', '8.2']
+
+    name: Test with PHP ${{ matrix.php-version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          tools: composer:v2
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --prefer-dist
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Run PHP Linter
+        run: find . -name "*.php" -type f -print0 | xargs -0 -n1 -P4 php -l
+
   build-release-package:
+    needs: test # This job will only run if the 'test' job completes successfully
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,7 +58,8 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '7.4'
+          # Run on the minimum supported version for the build package
+          php-version: '7.4' 
           tools: composer:v2
 
       # 4. Cache Composer dependencies
