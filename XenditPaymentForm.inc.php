@@ -42,7 +42,7 @@ class XenditPaymentForm extends Form {
 		$host = 'https://api.xendit.co';
 		$headers = [
 			'Content-Type'  => 'application/json',
-			'User-Agent'    => 'OJS-Xendit-Plugin/1.0',
+			'User-Agent'    => 'OJS-Xendit-Plugin/1.0.0.0 (OJS ' . Application::get()->getCurrentVersion()->getVersionString() . ')',
 			'Authorization' => 'Basic ' . base64_encode($apiKey . ':')
 		];
 

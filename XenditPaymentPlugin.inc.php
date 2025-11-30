@@ -66,51 +66,51 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 		}
 
 		$form->addGroup([
-				'id' => 'xenditpayment',
-				'label' => $this->getDisplayName(),
-				'showWhen' => 'paymentsEnabled',
-			])
-			->addField(new \PKP\components\forms\FieldOptions('testMode', [
-				'label' => __('plugins.paymethod.xendit.settings.testMode'),
-				'options' => [
-					['value' => true, 'label' => __('common.enable')]
-				],
-				'value' => (bool) $this->getSetting($context->getId(), 'testMode'),
-				'groupId' => 'xenditpayment',
-			]))
-			// Replace clientId/secret with apiKey
-			->addField(new \PKP\components\forms\FieldText('apiKey', [
-				'label' => __('plugins.paymethod.xendit.settings.apiKey'),
-				'description' => __('plugins.paymethod.xendit.settings.apiKey.description'),
-				'value' => $this->getSetting($context->getId(), 'apiKey'),
-				'groupId' => 'xenditpayment',
-			]))
-			// Add Webhook Secret for security
-			->addField(new \PKP\components\forms\FieldText('webhookSecret', [
-				'label' => __('plugins.paymethod.xendit.settings.webhookSecret'),
-				'description' => __('plugins.paymethod.xendit.settings.webhookSecret.description'),
-				'value' => $this->getSetting($context->getId(), 'webhookSecret'),
-				'groupId' => 'xenditpayment',
-			]))
-			->addField(new \PKP\components\forms\FieldText('invoiceDuration', [
-				'label' => __('plugins.paymethod.xendit.settings.invoiceDuration'),
-				'description' => __('plugins.paymethod.xendit.settings.invoiceDuration.description'),
-				'value' => $this->getSetting($context->getId(), 'invoiceDuration') ?? 30, // Default 30 hari
-				'size' => 'small',
-				'validation' => ['integer', 'min:1'],
-				'groupId' => 'xenditpayment',
-			]))
-			->addField(new \PKP\components\forms\FieldOptions('notificationChannels', [
-				'label' => __('plugins.paymethod.xendit.settings.notificationChannels'),
-				'description' => __('plugins.paymethod.xendit.settings.notificationChannels.description'),
-				'type' => 'checkbox',
-				'options' => [
-					['value' => 'email', 'label' => 'Email'],
-					['value' => 'whatsapp', 'label' => 'WhatsApp'],
-				],
-				'value' => $this->getSetting($context->getId(), 'notificationChannels') ?? ['email'],
-				'groupId' => 'xenditpayment',
-			]));
+			'id' => 'xenditpayment',
+			'label' => $this->getDisplayName(),
+			'showWhen' => 'paymentsEnabled',
+		])
+		->addField(new \PKP\components\forms\FieldOptions('testMode', [
+			'label' => __('plugins.paymethod.xendit.settings.testMode'),
+			'options' => [
+				['value' => true, 'label' => __('common.enable')]
+			],
+			'value' => (bool) $this->getSetting($context->getId(), 'testMode'),
+			'groupId' => 'xenditpayment',
+		]))
+		// Replace clientId/secret with apiKey
+		->addField(new \PKP\components\forms\FieldText('apiKey', [
+			'label' => __('plugins.paymethod.xendit.settings.apiKey'),
+			'description' => __('plugins.paymethod.xendit.settings.apiKey.description'),
+			'value' => $this->getSetting($context->getId(), 'apiKey'),
+			'groupId' => 'xenditpayment',
+		]))
+		// Add Webhook Secret for security
+		->addField(new \PKP\components\forms\FieldText('webhookSecret', [
+			'label' => __('plugins.paymethod.xendit.settings.webhookSecret'),
+			'description' => __('plugins.paymethod.xendit.settings.webhookSecret.description'),
+			'value' => $this->getSetting($context->getId(), 'webhookSecret'),
+			'groupId' => 'xenditpayment',
+		]))
+		->addField(new \PKP\components\forms\FieldText('invoiceDuration', [
+			'label' => __('plugins.paymethod.xendit.settings.invoiceDuration'),
+			'description' => __('plugins.paymethod.xendit.settings.invoiceDuration.description'),
+			'value' => $this->getSetting($context->getId(), 'invoiceDuration') ?? 30, // Default 30 hari
+			'size' => 'small',
+			'validation' => ['integer', 'min:1'],
+			'groupId' => 'xenditpayment',
+		]))
+		->addField(new \PKP\components\forms\FieldOptions('notificationChannels', [
+			'label' => __('plugins.paymethod.xendit.settings.notificationChannels'),
+			'description' => __('plugins.paymethod.xendit.settings.notificationChannels.description'),
+			'type' => 'checkbox',
+			'options' => [
+				['value' => 'email', 'label' => 'Email'],
+				['value' => 'whatsapp', 'label' => 'WhatsApp'],
+			],
+			'value' => $this->getSetting($context->getId(), 'notificationChannels') ?? ['email'],
+			'groupId' => 'xenditpayment',
+		]));
 	}
 
 	public function saveSettings($params, $slimRequest, $request) {
@@ -120,7 +120,7 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			switch ($param) {
 				case 'apiKey':
 				case 'webhookSecret':
-					$saveParams[$param] = (string) $val;
+					$saveParams[$param] = trim((string) $val);
 					break;
 				case 'invoiceDuration':
 					$saveParams[$param] = (int) $val;
@@ -209,14 +209,17 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 
 				echo 'Webhook received and processed';
 				header('HTTP/1.1 200 OK');
+				exit;
 			} catch (\Exception $e) {
 				error_log('Xendit Webhook Error: ' . $e->getMessage());
 				header('HTTP/1.1 500 Internal Server Error');
+				exit;
 			}
 		} else {
 			error_log('Xendit DEBUG: No relevant Payment ID found in payload. Event not processed.');
 			echo 'Webhook acknowledged (Event not processed)';
 			header('HTTP/1.1 200 OK');
+			exit;
 		}
 	}
 
