@@ -9,6 +9,6 @@
     }
   ],
   "require": {
-    "xendit/xendit-php": "7.0.0"
+    "xendit/xendit-php": "^7.0.0"
   }
 }
