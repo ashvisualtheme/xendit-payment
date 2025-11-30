@@ -1,4 +1,7 @@
 {
+  "name": "ashvisualtheme/xendit-payment",
+  "description": "Xendit payment plugin for Open Journal Systems (OJS).",
+  "license": "GPL-3.0-or-later",
   "repositories": [
     {
       "type": "vcs",
