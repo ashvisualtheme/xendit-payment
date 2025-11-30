@@ -63,7 +63,7 @@ class XenditPaymentProcessor {
         // Check if this payment has already been completed to prevent double-processing
         $completedPaymentDao = DAORegistry::getDAO('OJSCompletedPaymentDAO');
 
-        if ($completedPaymentDao->getByQueuedPaymentId($queuedPayment->getId())) {
+        if ($completedPaymentDao->getByAssoc($queuedPayment->getUserId(), $queuedPayment->getType(), $queuedPayment->getAssocId())) {
             // Payment already processed. Log it and exit gracefully with a 200 OK.
             return;
         }
