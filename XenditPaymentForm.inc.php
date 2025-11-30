@@ -198,16 +198,17 @@ class XenditPaymentForm extends Form {
 			
 			// Check if an invoice already exists and is pending
 			try {
-				$response = $client->request('GET', $host . '/v2/invoices?external_id=' . urlencode($externalId), ['headers' => $headers]);
-				$existingInvoices = json_decode($response->getBody()->getContents());
+				$checkResponse = $client->request('GET', $host . '/v2/invoices?external_id=' . urlencode($externalId), ['headers' => $headers]);
+				$existingInvoices = json_decode($checkResponse->getBody()->getContents());
 
-				if (!empty($existingInvoices)) {
+				if (!empty($existingInvoices) && is_array($existingInvoices)) {
 					// Invoices are returned newest first. Check the first one.
-					$latestInvoice = $existingInvoices[0];
-					if ($latestInvoice->status === 'PENDING') {
-						// Found an active invoice, redirect user to it
-						$request->redirectUrl($latestInvoice->invoice_url);
-						return; // Stop further execution
+					foreach ($existingInvoices as $inv) {
+						if ($inv->status === 'PENDING') {
+							// Found an active invoice, redirect user to it
+							$request->redirectUrl($inv->invoice_url);
+							return; // Stop further execution
+						}
 					}
 				}
 			} catch (RequestException $e) {
