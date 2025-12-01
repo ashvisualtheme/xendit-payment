@@ -103,19 +103,27 @@ class XenditPaymentForm extends Form {
 					$queuedPaymentDao->updateObject($this->_queuedPayment->getId(), $this->_queuedPayment);
 				}
 
+				$mobileNumber = method_exists($primaryAuthor, 'getPhone') ? $primaryAuthor->getPhone() : '-';
 
 				$customerData = [
-					'reference_id' => 'OJS_AUTHOR_' . $primaryAuthor->getId(),
-					'type' => 'INDIVIDUAL',
-					'individual_detail' => [
-						'given_names' => $givenName,
-						'surname' => $familyName ? $familyName : $givenName
-					],
+					'given_names' => $givenName,
+					'surname' => $familyName ? $familyName : $givenName,
 					'email' => $payerEmail,
-					'addresses' => [[
-						'country' => $primaryAuthor->getCountry(),
-					]]
 				];
+
+				if (!empty($mobileNumber)) {
+					$customerData['mobile_number'] = $mobileNumber;
+				}
+
+				$country = $primaryAuthor->getCountry();
+				$affiliation = $primaryAuthor->getAffiliation($locale);
+
+				$address = ['country' => $country];
+				if (!empty($affiliation)) {
+					$address['street_line1'] = $affiliation;
+				}
+				$customerData['addresses'] = [$address];
+
 			}
 
 			// For other payment types, or if the above logic didn't set $user (which it should for publication payments),
@@ -135,19 +143,26 @@ class XenditPaymentForm extends Form {
 				$familyName = $user->getFamilyName($locale);
 				$payerEmail = $user->getEmail();
 
+				$mobileNumber = $user->getPhone() ?? '';
+
 				$customerData = [
-					'reference_id' => 'OJS_USER_' . $user->getId(),
-					'type' => 'INDIVIDUAL',
-					'individual_detail' => [
-						'given_names' => $givenName,
-						'surname' => $familyName ? $familyName : $givenName
-					],
+					'given_names' => $givenName,
+					'surname' => $familyName ? $familyName : $givenName,
 					'email' => $payerEmail,
-					'addresses' => [[
-						'country' => $user->getCountry(),
-					]]
 				];
 
+				if (!empty($mobileNumber)) {
+					$customerData['mobile_number'] = $mobileNumber;
+				}
+
+				$country = $user->getCountry();
+				$affiliation = $user->getAffiliation($locale);
+
+				$address = ['country' => $country];
+				if (!empty($affiliation)) {
+					$address['street_line1'] = $affiliation;
+				}
+				$customerData['addresses'] = [$address];
 			}
 
 			$paymentDescription = strip_tags($paymentManager->getPaymentName($this->_queuedPayment));
@@ -230,7 +245,6 @@ class XenditPaymentForm extends Form {
 				'external_id' => $externalId, // Use the new deterministic ID
 				'amount' => $paymentAmount,
 				'currency' => $this->_queuedPayment->getCurrencyCode(),
-				'payer_email' => $payerEmail,
 				'description' => $paymentDescription,
 				'customer' => $customerData,
 				'success_redirect_url' => $successUrl,
@@ -264,6 +278,9 @@ class XenditPaymentForm extends Form {
 				'ojs_context_id' => $journal->getId(),
 				'ojs_payment_type' => $paymentType,
 			];
+
+			// Debug log for the invoice creation payload
+			error_log('Xendit DEBUG (FORM): Payload to create invoice: ' . json_encode($invoiceData, JSON_PRETTY_PRINT));
 
 			$response = $client->request('POST', $host . '/v2/invoices', [
 				'headers' => $headers,
