@@ -65,6 +65,13 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 			return;
 		}
 
+		$request = Application::get()->getRequest();
+		$dispatcher = $request->getDispatcher();
+		$webhookUrl = $dispatcher->url($request, ROUTE_PAGE, $context->getPath(), 'payment', 'plugin', array('XenditPayment', 'webhook'));
+		
+		$descriptionWithUrl = __('plugins.paymethod.xendit.settings.webhookSecret.description') . 
+			'<br><code>' . $webhookUrl . '</code>';
+
 		$form->addGroup([
 			'id' => 'xenditpayment',
 			'label' => $this->getDisplayName(),
@@ -88,7 +95,7 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 		// Add Webhook Secret for security
 		->addField(new \PKP\components\forms\FieldText('webhookSecret', [
 			'label' => __('plugins.paymethod.xendit.settings.webhookSecret'),
-			'description' => __('plugins.paymethod.xendit.settings.webhookSecret.description'),
+			'description' => $descriptionWithUrl,
 			'value' => $this->getSetting($context->getId(), 'webhookSecret'),
 			'groupId' => 'xenditpayment',
 		]))

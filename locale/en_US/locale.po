@@ -30,7 +30,7 @@ msgid "plugins.paymethod.xendit.settings.webhookSecret"
 msgstr "Webhook Secret"
 
 msgid "plugins.paymethod.xendit.settings.webhookSecret.description"
-msgstr "Enter your webhook verification token. You can find this in your Xendit Dashboard under Settings > Webhooks."
+msgstr "Enter your webhook verification token. You can find this in your Xendit Dashboard under Settings > Webhooks. Please use the URL below to configure your Webhook:"
 
 msgid "plugins.paymethod.xendit.settings.invoiceDuration"
 msgstr "Invoice Duration (Days)"

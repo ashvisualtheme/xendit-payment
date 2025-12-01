@@ -30,7 +30,7 @@ msgid "plugins.paymethod.xendit.settings.webhookSecret"
 msgstr "Kode Webhook"
 
 msgid "plugins.paymethod.xendit.settings.webhookSecret.description"
-msgstr "Masukkan token verifikasi webhook Anda. Anda dapat menemukannya di Dasbor Xendit Anda di bawah Pengaturan > Webhook."
+msgstr "Masukkan token verifikasi webhook Anda. Anda dapat menemukannya di Dasbor Xendit Anda di bawah Pengaturan > Webhook. Gunakan URL dibawah untuk konfigurasi webhook anda:"
 
 msgid "plugins.paymethod.xendit.settings.invoiceDuration"
 msgstr "Durasi Faktur (Hari)"
