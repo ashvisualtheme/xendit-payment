@@ -217,12 +217,12 @@ class XenditPaymentPlugin extends PaymethodPlugin {
 				header('HTTP/1.1 200 OK');
 				exit;
 			} catch (\Exception $e) {
-				error_log('Xendit Webhook Error: ' . $e->getMessage());
+				// error_log('Xendit Webhook Error: ' . $e->getMessage());
 				header('HTTP/1.1 500 Internal Server Error');
 				exit;
 			}
 		} else {
-			error_log('Xendit DEBUG: No relevant Payment ID found in payload. Event not processed.');
+			// error_log('Xendit DEBUG: No relevant Payment ID found in payload. Event not processed.');
 			echo 'Webhook acknowledged (Event not processed)';
 			header('HTTP/1.1 200 OK');
 			exit;

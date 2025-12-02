@@ -164,7 +164,7 @@ class XenditPaymentProcessor {
                 // For these types, creating the CompletedPayment record is sufficient.
                 break;
             default:
-                error_log('Xendit DEBUG: Invalid payment type: ' . $queuedPayment->getType());
+                // error_log('Xendit DEBUG: Invalid payment type: ' . $queuedPayment->getType());
                 throw new \Exception('Invalid payment type "' . $queuedPayment->getType() . '"');
         }
     }

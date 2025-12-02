@@ -301,9 +301,9 @@ class XenditPaymentForm extends Form {
 				$errorBody = $e->getResponse()->getBody()->getContents();
 				// Attempt to decode JSON for more specific Xendit error messages
 				$errorJson = json_decode($errorBody);
-				if (json_last_error() === JSON_ERROR_NONE && isset($errorJson->message)) {
-					error_log('Xendit DEBUG (FORM): Xendit Error Message: ' . $errorJson->message);
-				}
+				// if (json_last_error() === JSON_ERROR_NONE && isset($errorJson->message)) {
+				// 	error_log('Xendit DEBUG (FORM): Xendit Error Message: ' . $errorJson->message);
+				// }
 			}
 			$templateMgr = TemplateManager::getManager($request);
 			$templateMgr->assign('message', 'plugins.paymethod.xendit.error');
