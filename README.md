@@ -29,6 +29,10 @@ This plugin is compatible with OJS 3.3.x
 4.  An active Xendit account.
 5.  Composer v2 to manage PHP dependencies.
 
+## 📺 Video Tutorial
+Watch the complete installation and configuration guide on YouTube:
+[![Watch the video](https://img.youtube.com/vi/ruSUEiLCB1w/maxresdefault.jpg)](https://youtu.be/ruSUEiLCB1w)
+
 ## 🚀 Installation
 
 ### 1. Via OJS Admin Dashboard (Recommended Method)
