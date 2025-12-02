@@ -10,7 +10,7 @@ Xendit payment plugin for Open Journal Systems (OJS). This plugin integrates OJS
 
 ## Supported OJS Versions
 
-This plugin is compatible with OJS 3.3.x and newer versions.
+This plugin is compatible with OJS 3.3.x
 
 ## ✨ Features
 
@@ -23,7 +23,7 @@ This plugin is compatible with OJS 3.3.x and newer versions.
 
 ## 📋 Prerequisites
 
-1.  OJS version 3.3.x or newer.
+1.  OJS version 3.3.x
 2.  PHP 7.4 or newer.
 3.  PHP extensions `curl` and `json`.
 4.  An active Xendit account.
