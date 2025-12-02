@@ -12,6 +12,6 @@
 <version>
 	<application>xenditPayment</application>
 	<type>plugins.paymethod</type>
-	<release>1.0.0.0</release>
-	<date>2025-11-11</date>
+	<release>1.3.0.0</release>
+	<date>2025-12-02</date>
 </version>
