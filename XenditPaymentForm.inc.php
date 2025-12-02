@@ -278,9 +278,6 @@ class XenditPaymentForm extends Form {
 				'ojs_payment_type' => $paymentType,
 			];
 
-			// Debug log for the invoice creation payload
-			error_log('Xendit DEBUG (FORM): Payload to create invoice: ' . json_encode($invoiceData, JSON_PRETTY_PRINT));
-
 			$response = $client->request('POST', $host . '/v2/invoices', [
 				'headers' => $headers,
 				'body' => json_encode($invoiceData)
